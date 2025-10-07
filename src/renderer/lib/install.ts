@@ -3,75 +3,73 @@ import { RESTART_ON_FAILURE, WINBOAT_DIR, WINBOAT_GUEST_API } from "./constants"
 import YAML from "json-to-pretty-yaml";
 import { createLogger } from "../utils/log";
 import { createNanoEvents, type Emitter } from "nanoevents";
-const fs: typeof import('fs') = require('fs');
-const { exec }: typeof import('child_process') = require('child_process');
-const path: typeof import('path') = require('path');
-const { promisify }: typeof import('util') = require('util');
-const nodeFetch: typeof import('node-fetch').default = require('node-fetch');
-const remote: typeof import('@electron/remote') = require('@electron/remote');
+import { ContainerRuntime } from "./containerRuntime";
+const fs: typeof import("fs") = require("fs");
+const { exec }: typeof import("child_process") = require("child_process");
+const path: typeof import("path") = require("path");
+const { promisify }: typeof import("util") = require("util");
+const nodeFetch: typeof import("node-fetch").default = require("node-fetch");
+const remote: typeof import("@electron/remote") = require("@electron/remote");
 
 const execAsync = promisify(exec);
-const logger = createLogger(path.join(WINBOAT_DIR, 'install.log'));
+const logger = createLogger(path.join(WINBOAT_DIR, "install.log"));
 
-const composeFilePath = path.join(WINBOAT_DIR, 'docker-compose.yml');
+const composeFilePath = path.join(WINBOAT_DIR, "docker-compose.yml");
 export const DefaultCompose: ComposeConfig = {
-    "name": "winboat",
-    "volumes": {
-        "data": null
+    name: "winboat",
+    volumes: {
+        data: null,
     },
-    "services": {
-        "windows": {
-            "image": "ghcr.io/dockur/windows:5.03",
-            "container_name": "WinBoat",
-            "environment": {
-                "VERSION": "11",
-                "RAM_SIZE": "4G",
-                "CPU_CORES": "4",
-                "DISK_SIZE": "64G",
-                "USERNAME": "MyWindowsUser",
-                "PASSWORD": "MyWindowsPassword",
-                "HOME": "${HOME}",
-                "LANGUAGE": "English",
-                "HOST_PORTS": "7149",
-                "ARGUMENTS": "-qmp tcp:0.0.0.0:7149,server,wait=off"
+    services: {
+        windows: {
+            image: "ghcr.io/dockur/windows:5.03",
+            container_name: "WinBoat",
+            environment: {
+                VERSION: "11",
+                RAM_SIZE: "4G",
+                CPU_CORES: "4",
+                DISK_SIZE: "64G",
+                USERNAME: "MyWindowsUser",
+                PASSWORD: "MyWindowsPassword",
+                HOME: "${HOME}",
+                LANGUAGE: "English",
+                HOST_PORTS: "7149",
+                USER_PORTS: "7148",
+                ARGUMENTS: "-qmp tcp:0.0.0.0:7149,server,wait=off",
             },
-            "cap_add": [
-                "NET_ADMIN"
-            ],
-            "privileged": true,
-            "ports": [
+            cap_add: ["NET_ADMIN"],
+            privileged: true,
+            ports: [
                 "8006:8006", // VNC Web Interface
                 "7148:7148", // Winboat Guest Server API
                 "7149:7149", // QEMU QMP Port
                 "3389:3389/tcp", // RDP
-                "3389:3389/udp" // RDP
+                "3389:3389/udp", // RDP
             ],
-            "stop_grace_period": "120s",
-            "restart": RESTART_ON_FAILURE,
-            "volumes": [
+            stop_grace_period: "120s",
+            restart: RESTART_ON_FAILURE,
+            volumes: [
                 "data:/storage",
                 "${HOME}:/shared",
                 "/dev/bus/usb:/dev/bus/usb", // QEMU Synamic USB Passthrough
                 "./oem:/oem",
             ],
-            "devices": [
-                "/dev/kvm",
-            ]
-        }
-    }
-}
+            devices: ["/dev/kvm"],
+        },
+    },
+};
 export const InstallStates = {
-    IDLE: 'Preparing',
-    CREATING_COMPOSE_FILE: 'Creating Compose File',
+    IDLE: "Preparing",
+    CREATING_COMPOSE_FILE: "Creating Compose File",
     CREATING_OEM: "Creating OEM Assets",
-    STARTING_CONTAINER: 'Starting Container',
-    MONITORING_PREINSTALL: 'Monitoring Preinstall',
-    INSTALLING_WINDOWS: 'Installing Windows',
-    COMPLETED: 'Completed',
-    INSTALL_ERROR: 'Install Error'
+    STARTING_CONTAINER: "Starting Container",
+    MONITORING_PREINSTALL: "Monitoring Preinstall",
+    INSTALLING_WINDOWS: "Installing Windows",
+    COMPLETED: "Completed",
+    INSTALL_ERROR: "Install Error",
 } as const;
 
-export type InstallState = typeof InstallStates[keyof typeof InstallStates];
+export type InstallState = (typeof InstallStates)[keyof typeof InstallStates];
 interface InstallEvents {
     stateChanged: (state: InstallState) => void;
     preinstallMsg: (msg: string) => void;
@@ -87,28 +85,28 @@ export class InstallManager {
     constructor(conf: InstallConfiguration) {
         this.conf = conf;
         this.state = InstallStates.IDLE;
-        this.preinstallMsg = ""
+        this.preinstallMsg = "";
         this.emitter = createNanoEvents<InstallEvents>();
     }
 
     changeState(newState: InstallState) {
         this.state = newState;
-        this.emitter.emit('stateChanged', newState);
+        this.emitter.emit("stateChanged", newState);
         logger.info(`New state: "${newState}"`);
     }
 
     setPreinstallMsg(msg: string) {
         if (msg === this.preinstallMsg) return;
         this.preinstallMsg = msg;
-        this.emitter.emit('preinstallMsg', msg);
+        this.emitter.emit("preinstallMsg", msg);
         logger.info(`Preinstall: "${msg}"`);
     }
 
     sleep(ms: number) {
-        return new Promise(resolve => setTimeout(resolve, ms));
+        return new Promise((resolve) => setTimeout(resolve, ms));
     }
 
-    createComposeFile() {
+    async createComposeFile() {
         this.changeState(InstallStates.CREATING_COMPOSE_FILE);
 
         // Ensure the .winboat directory exists
@@ -124,7 +122,7 @@ export class InstallManager {
         }
 
         // Configure the compose file
-        const composeContent = { ...DefaultCompose }
+        const composeContent = { ...DefaultCompose };
 
         composeContent.services.windows.environment.RAM_SIZE = `${this.conf.ramGB}G`;
         composeContent.services.windows.environment.CPU_CORES = `${this.conf.cpuCores}`;
@@ -133,7 +131,7 @@ export class InstallManager {
         composeContent.services.windows.environment.LANGUAGE = this.conf.windowsLanguage;
         composeContent.services.windows.environment.USERNAME = this.conf.username;
         composeContent.services.windows.environment.PASSWORD = this.conf.password;
-        
+
         if (this.conf.customIsoPath) {
             composeContent.services.windows.volumes.push(`${this.conf.customIsoPath}:/boot.iso`);
         }
@@ -146,10 +144,26 @@ export class InstallManager {
             composeContent.services.windows.volumes.push(`${this.conf.installFolder}:/storage`);
         }
 
-        
+        // Apply Podman-specific configurations
+        const runtime = await ContainerRuntime.detectRuntime();
+        if (runtime === "podman") {
+            logger.info("Detected Podman runtime, applying Podman-specific configurations");
+
+            // Podman-specific: Disable SELinux labeling for better compatibility with KVM
+            (composeContent.services.windows as any).security_opt = ["label=disable"];
+
+            // Note: We keep privileged mode and don't set userns_mode because they conflict
+            // Privileged mode is required for KVM access
+
+            // Update ARGUMENTS for Podman
+            composeContent.services.windows.environment.ARGUMENTS =
+                "-qmp tcp:0.0.0.0:7149,server,wait=off -device e1000,netdev=network0 -netdev user,id=network0,hostfwd=tcp::7148-:7148,hostfwd=tcp::3389-:3389,hostfwd=udp::3389-:3389";
+
+            logger.info("Applied Podman-specific configurations");
+        }
         // Write the compose file
         const composeYAML = YAML.stringify(composeContent).replaceAll("null", "");
-        fs.writeFileSync(composeFilePath, composeYAML, { encoding: 'utf8' });
+        fs.writeFileSync(composeFilePath, composeYAML, { encoding: "utf8" });
         logger.info(`Creating compose file at: ${composeFilePath}`);
         logger.info(`Compose file content: ${JSON.stringify(composeContent, null, 2)}`);
     }
@@ -158,7 +172,7 @@ export class InstallManager {
         this.changeState(InstallStates.CREATING_OEM);
         logger.info("Creating OEM assets");
 
-        const oemPath = path.join(WINBOAT_DIR, 'oem'); // Fixed the path separator
+        const oemPath = path.join(WINBOAT_DIR, "oem"); // Fixed the path separator
 
         // Create OEM directory if it doesn’t exist
         if (!fs.existsSync(oemPath)) {
@@ -167,9 +181,9 @@ export class InstallManager {
         }
 
         // Determine the source path based on whether the app is bundled
-        const appPath = remote.app.isPackaged 
-            ? path.join(process.resourcesPath, 'guest_server') // For packaged app
-            : path.join(remote.app.getAppPath(), '..', '..', 'guest_server'); // For dev mode
+        const appPath = remote.app.isPackaged
+            ? path.join(process.resourcesPath, "guest_server") // For packaged app
+            : path.join(remote.app.getAppPath(), "..", "..", "guest_server"); // For dev mode
 
         logger.info(`Guest server source path: ${appPath}`);
 
@@ -183,20 +197,20 @@ export class InstallManager {
 
         const copyRecursive = (src: string, dest: string) => {
             const stats = fs.statSync(src);
-            
+
             if (stats.isDirectory()) {
                 // Create directory if it doesn't exist
                 if (!fs.existsSync(dest)) {
                     fs.mkdirSync(dest, { recursive: true });
                 }
-                
+
                 // Copy all contents
-                fs.readdirSync(src).forEach(entry => {
+                fs.readdirSync(src).forEach((entry) => {
                     const srcPath = path.join(src, entry);
                     const destPath = path.join(dest, entry);
                     copyRecursive(srcPath, destPath);
                 });
-                
+
                 logger.info(`Copied directory ${src} to ${dest}`);
             } else {
                 // Copy file
@@ -207,7 +221,7 @@ export class InstallManager {
 
         // Copy all files from guest_server to oemPath
         try {
-            fs.readdirSync(appPath).forEach(entry => {
+            fs.readdirSync(appPath).forEach((entry) => {
                 const srcPath = path.join(appPath, entry);
                 const destPath = path.join(oemPath, entry);
                 copyRecursive(srcPath, destPath);
@@ -222,22 +236,21 @@ export class InstallManager {
 
     async startContainer() {
         this.changeState(InstallStates.STARTING_CONTAINER);
-        logger.info('Starting container...');
+        logger.info("Starting container...");
 
         // Start the container
         try {
-            // execSync(`docker compose -f ${composeFilePath} up -d`, { stdio: 'inherit' });
-            const { stdout, stderr } = await execAsync(`docker compose -f ${composeFilePath} up -d`);
+            const { stdout, stderr } = await ContainerRuntime.composeUp(composeFilePath);
             if (stderr) {
                 logger.error(stderr);
             }
         } catch (e) {
             this.changeState(InstallStates.INSTALL_ERROR);
-            logger.error('Failed to start container.');
+            logger.error("Failed to start container.");
             logger.error(e);
             throw e;
         }
-        logger.info('Container started successfully.');
+        logger.info("Container started successfully.");
     }
 
     async monitorContainerPreinstall() {
@@ -245,13 +258,13 @@ export class InstallManager {
         await this.sleep(3000);
 
         this.changeState(InstallStates.MONITORING_PREINSTALL);
-        logger.info('Starting preinstall monitoring...');
+        logger.info("Starting preinstall monitoring...");
 
         while (true) {
             try {
-                const response = await nodeFetch('http://127.0.0.1:8006/msg.html');
+                const response = await nodeFetch("http://127.0.0.1:8006/msg.html");
                 if (response.status === 404) {
-                    logger.info('Received 404, preinstall completed');
+                    logger.info("Received 404, preinstall completed");
                     return; // Exit the method when we get 404
                 }
                 const message = await response.text();
@@ -259,8 +272,8 @@ export class InstallManager {
                 const messageFormatted = message.match(re)?.[1] || message;
                 this.setPreinstallMsg(messageFormatted);
             } catch (error) {
-                if (error instanceof Error && error.message.includes('404')) {
-                    logger.info('Received 404, preinstall completed');
+                if (error instanceof Error && error.message.includes("404")) {
+                    logger.info("Received 404, preinstall completed");
                     return; // Exit the method when fetch throws 404
                 }
                 logger.error(`Error monitoring container: ${error}`);
@@ -269,7 +282,7 @@ export class InstallManager {
             }
 
             // Wait 500ms before next check
-            await new Promise(resolve => setTimeout(resolve, 500));
+            await new Promise((resolve) => setTimeout(resolve, 500));
         }
     }
 
@@ -289,12 +302,12 @@ export class InstallManager {
                 }
                 // Log every 60 seconds (every 12th attempt with 5-second intervals)
                 if (attempts % 12 === 0) {
-                    logger.info(`API not ready yet (status: ${res.status}), still waiting after ${attempts * 5 / 60} minutes...`);
+                    logger.info(`API not ready yet (status: ${res.status}), still waiting after ${(attempts * 5) / 60} minutes...`);
                 }
             } catch (error) {
                 // Log every 60 seconds for errors too
                 if (attempts % 12 === 0) {
-                    logger.info(`API not responding yet, still waiting after ${attempts * 5 / 60} minutes...`);
+                    logger.info(`API not responding yet, still waiting after ${(attempts * 5) / 60} minutes...`);
                 }
             }
 
@@ -303,26 +316,25 @@ export class InstallManager {
         }
     }
 
-
     async install() {
-        logger.info('Starting installation...');
-        this.createComposeFile();
+        logger.info("Starting installation...");
+        await this.createComposeFile();
         this.createOEMAssets();
         await this.startContainer();
         await this.monitorContainerPreinstall();
         await this.monitorAPIHealth();
         this.changeState(InstallStates.COMPLETED);
-        logger.info('Installation completed successfully.');
+        logger.info("Installation completed successfully.");
     }
 }
 
 export async function isInstalled() {
-    // Check if a docker container named WinBoat exists
+    // Check if a container named WinBoat exists
     try {
-        const { stdout: res } = await execAsync('docker ps -a --filter "name=WinBoat" --format "{{.Names}}"');
-        return res.includes('WinBoat');
-    } catch(e) {
-        logger.error("Failed to get WinBoat status, is Docker installed?");
+        const res = await ContainerRuntime.containerList("name=WinBoat");
+        return res.includes("WinBoat");
+    } catch (e) {
+        logger.error("Failed to get WinBoat status, is the container runtime installed?");
         logger.error(e);
         return false;
     }

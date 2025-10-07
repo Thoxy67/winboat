@@ -1,15 +1,20 @@
 import { getFreeRDP } from '../utils/getFreeRDP';
+import { ContainerRuntime } from './containerRuntime';
 const fs: typeof import('fs') = require('fs');
 const os: typeof import('os') = require('os');
 const { exec }: typeof import('child_process') = require('child_process');
 const { promisify }: typeof import('util') = require('util');
 const execAsync = promisify(exec);
 
-export function satisfiesPrequisites(specs: Specs) {
+export async function satisfiesPrequisites(specs: Specs): Promise<boolean> {
+    // Check if group membership is required (only for Docker, not Podman)
+    const requiresGroup = await ContainerRuntime.requiresGroupMembership();
+    const groupCheckPassed = requiresGroup ? specs.dockerIsInUserGroups : true;
+
     return specs.dockerInstalled &&
-        specs.dockerComposeInstalled && 
+        specs.dockerComposeInstalled &&
         specs.dockerIsRunning &&
-        specs.dockerIsInUserGroups &&
+        groupCheckPassed &&
         specs.freeRDP3Installed &&
         specs.ipTablesLoaded &&
         specs.iptableNatLoaded &&
@@ -61,48 +66,38 @@ export async function getSpecs() {
         console.error('Error reading /proc/cpuinfo or checking /dev/kvm:', e);
     }
 
-    // Docker check
+    // Container runtime check (Docker or Podman)
     try {
-        const { stdout: dockerOutput } = await execAsync('docker --version');
-        specs.dockerInstalled = !!dockerOutput;
+        const runtime = await ContainerRuntime.detectRuntime();
+        specs.dockerInstalled = runtime !== null;
     } catch (e) {
-        console.error('Error checking for Docker installation:', e);
+        console.error('Error checking for container runtime installation:', e);
     }
 
-    // Docker Compose plugin check with version validation
+    // Container runtime compose plugin check with version validation
     try {
-        const { stdout: dockerComposeOutput } = await execAsync('docker compose version');
-        if (dockerComposeOutput) {
-            // Example output: "Docker Compose version v2.35.1"
-            // Example output 2: "Docker Compose version 2.36.2"
-            const versionMatch = dockerComposeOutput.match(/(\d+\.\d+\.\d+)/);
-            if (versionMatch) {
-                const majorVersion = parseInt(versionMatch[1].split('.')[0], 10);
-                specs.dockerComposeInstalled = majorVersion >= 2;
-            } else {
-                specs.dockerComposeInstalled = false; // No valid version found
-            }
+        const runtimeInfo = await ContainerRuntime.getRuntimeInfo();
+        if (runtimeInfo) {
+            specs.dockerComposeInstalled = runtimeInfo.composeInstalled;
         } else {
-            specs.dockerComposeInstalled = false; // No output, plugin not installed
+            specs.dockerComposeInstalled = false;
         }
     } catch (e) {
-        console.error('Error checking Docker Compose version:', e);
+        console.error('Error checking container runtime compose version:', e);
     }
 
-    // Docker is running check
+    // Container runtime is running check
     try {
-        const { stdout: dockerOutput } = await execAsync('docker ps');
-        specs.dockerIsRunning = !!dockerOutput;
+        specs.dockerIsRunning = await ContainerRuntime.isRuntimeRunning();
     } catch (e) {
-        console.error('Error checking if Docker is running:', e);
+        console.error('Error checking if container runtime is running:', e);
     }
 
-    // Docker user group check
+    // Container runtime user group check
     try {
-        const userGroups = (await execAsync('id -Gn')).stdout;
-        specs.dockerIsInUserGroups = userGroups.split(/\s+/).includes('docker');
+        specs.dockerIsInUserGroups = await ContainerRuntime.isUserInRuntimeGroup();
     } catch (e) {
-        console.error('Error checking user groups for docker:', e);
+        console.error('Error checking user groups for container runtime:', e);
     }
 
     // FreeRDP 3.x.x check (including Flatpak)

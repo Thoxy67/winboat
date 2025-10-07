@@ -4,10 +4,10 @@ export type Specs = {
     cpuCores: number;
     ramGB: number;
     kvmEnabled: boolean;
-    dockerInstalled: boolean;
-    dockerComposeInstalled: boolean,
-    dockerIsRunning: boolean,
-    dockerIsInUserGroups: boolean;
+    dockerInstalled: boolean; // Actually checks for any container runtime (Docker or Podman)
+    dockerComposeInstalled: boolean, // Actually checks for compose support
+    dockerIsRunning: boolean, // Actually checks if runtime is running
+    dockerIsInUserGroups: boolean; // Only required for Docker, not Podman
     freeRDP3Installed: boolean;
     ipTablesLoaded: boolean;
     iptableNatLoaded: boolean;

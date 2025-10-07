@@ -38,17 +38,21 @@ WinBoat is an Electron app which allows you to run Windows apps on Linux using a
 Before running WinBoat, ensure your system meets the following requirements:
 
 - **RAM**: At least 4 GB of RAM
-- **CPU**: At least 2 CPU threads  
+- **CPU**: At least 2 CPU threads
 - **Storage**: At least 32 GB free space in `/var`
 - **Virtualization**: KVM enabled in BIOS/UEFI
   - [How to enable virtualization](https://duckduckgo.com/?t=h_&q=how+to+enable+virtualization+in+%3Cmotherboard+brand%3E+bios&ia=web)
-- **Docker**: Required for containerization
-  - [Installation Guide](https://docs.docker.com/engine/install/)
-  - **⚠️ NOTE:** Docker Desktop is **not** supported, you will run into issues if you use it
-- **Docker Compose v2**: Required for compatibility with docker-compose.yml files
-  - [Installation Guide](https://docs.docker.com/compose/install/#plugin-linux-only)
-- **Docker User Group**: Add your user to the `docker` group
-  - [Setup Instructions](https://docs.docker.com/engine/install/linux-postinstall/#manage-docker-as-a-non-root-user)
+- **Container Runtime**: Docker or Podman required for containerization
+  - **Docker**: [Installation Guide](https://docs.docker.com/engine/install/)
+    - **⚠️ NOTE:** Docker Desktop is **not** supported
+  - **Podman**: [Installation Guide](https://podman.io/getting-started/installation)
+    - Supported on Podman 4.0+
+- **Compose Plugin v2**: Required for compatibility with docker-compose.yml files
+  - Docker: [Installation Guide](https://docs.docker.com/compose/install/#plugin-linux-only)
+  - Podman: Included by default with Podman 4.0+
+- **Runtime User Group**: Add your user to the `docker` or `podman` group
+  - Docker: [Setup Instructions](https://docs.docker.com/engine/install/linux-postinstall/#manage-docker-as-a-non-root-user)
+  - Podman: [Setup Instructions](https://github.com/containers/podman/blob/main/docs/tutorials/rootless_tutorial.md)
 - **FreeRDP**: Required for remote desktop connection (Please make sure you have **Version 3.x.x** with sound support included)
   - [Installation Guide](https://github.com/FreeRDP/FreeRDP/wiki/PreBuilds)
 - **Kernel Modules**: `iptables` and `iptable_nat` modules must be loaded
@@ -61,11 +65,13 @@ You can download the latest Linux builds under the [Releases](https://github.com
 - **.deb:** The intended format for Debian based distributions
 - **.rpm:** The intended format for Fedora based distributions
 
-## Known Issues About Container Runtimes
-- Podman is **unsupported** for now
-- Docker Desktop is **unsupported** for now
-- Distros that emulate Docker through a Podman socket are **unsupported**
-- Any rootless containerization solution is currently **unsupported**
+## Container Runtime Compatibility
+- **Docker**: Fully supported (rootful mode recommended)
+- **Podman**: Fully supported (4.0+, both rootful and rootless modes)
+- **Docker Desktop**: ❌ **Not supported** - use Docker Engine instead
+- **Podman with Docker socket emulation**: ✅ Supported (e.g., `podman-docker` package)
+
+**Note:** While rootless Podman is supported, rootful mode is recommended for better performance and fewer permission issues with KVM and USB passthrough.
 
 ## Building WinBoat
 - For building you need to have NodeJS and Go installed on your system

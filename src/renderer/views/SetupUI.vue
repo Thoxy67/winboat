@@ -79,16 +79,27 @@
                             <li class="flex items-center gap-2">
                                 <span v-if="specs.dockerInstalled" class="text-green-500">✔</span>
                                 <span v-else class="text-red-500">✘</span>
-                                Docker installed
-                                <a href="https://docs.docker.com/engine/install/" @click="openAnchorLink" target="_blank" class="text-violet-400 hover:underline ml-1">How?</a>
+                                <template v-if="detectedRuntime === 'podman'">
+                                    Podman installed
+                                    <a href="https://podman.io/getting-started/installation" @click="openAnchorLink" target="_blank" class="text-violet-400 hover:underline ml-1">How?</a>
+                                </template>
+                                <template v-else>
+                                    Docker installed
+                                    <a href="https://docs.docker.com/engine/install/" @click="openAnchorLink" target="_blank" class="text-violet-400 hover:underline ml-1">How?</a>
+                                </template>
                             </li>
                             <li class="flex items-center gap-2">
                                 <span v-if="specs.dockerComposeInstalled" class="text-green-500">✔</span>
                                 <span v-else class="text-red-500">✘</span>
-                                Docker Compose v2 installed
-                                <a href="https://docs.docker.com/compose/install/#plugin-linux-only" @click="openAnchorLink" target="_blank" class="text-violet-400 hover:underline ml-1">How?</a>
+                                <template v-if="detectedRuntime === 'podman'">
+                                    Podman Compose support
+                                </template>
+                                <template v-else>
+                                    Docker Compose v2 installed
+                                    <a href="https://docs.docker.com/compose/install/#plugin-linux-only" @click="openAnchorLink" target="_blank" class="text-violet-400 hover:underline ml-1">How?</a>
+                                </template>
                             </li>
-                            <li class="flex items-center gap-2">
+                            <li v-if="detectedRuntime === 'docker'" class="flex items-center gap-2">
                                 <span v-if="specs.dockerIsInUserGroups" class="text-green-500">✔</span>
                                 <span v-else class="text-red-500">✘</span>
                                 User added to the <span class="font-mono bg-neutral-700 rounded-md px-0.5">docker</span> group
@@ -100,11 +111,16 @@
                             <li class="flex items-center gap-2">
                                 <span v-if="specs.dockerIsRunning" class="text-green-500">✔</span>
                                 <span v-else class="text-red-500">✘</span>
-                                Docker daemon is running
-                                <span class="text-gray-600">
-                                    (Also enable on boot)
-                                </span>
-                                <a href="https://docs.docker.com/config/daemon/start/" @click="openAnchorLink" target="_blank" class="text-violet-400 hover:underline ml-1">How?</a>
+                                <template v-if="detectedRuntime === 'podman'">
+                                    Podman is accessible
+                                </template>
+                                <template v-else>
+                                    Docker daemon is running
+                                    <span class="text-gray-600">
+                                        (Also enable on boot)
+                                    </span>
+                                    <a href="https://docs.docker.com/config/daemon/start/" @click="openAnchorLink" target="_blank" class="text-violet-400 hover:underline ml-1">How?</a>
+                                </template>
                             </li>
                             <li class="flex items-center gap-2">
                                 <span v-if="specs.freeRDP3Installed" class="text-green-500">✔</span>
@@ -122,11 +138,11 @@
                         </ul>
                         <div class="flex flex-row gap-4 mt-6">
                             <x-button class="px-6" @click="currentStepIdx--">Back</x-button>
-                            <x-button 
-                                toggled 
-                                class="px-6" 
-                                @click="currentStepIdx++" 
-                                :disabled="!satisfiesPrequisites(specs)"
+                            <x-button
+                                toggled
+                                class="px-6"
+                                @click="currentStepIdx++"
+                                :disabled="!prerequisitesSatisfied"
                             >
                                 Next
                             </x-button>
@@ -573,6 +589,7 @@ import { useRouter } from 'vue-router';
 import { computedAsync } from '@vueuse/core'
 import { InstallConfiguration, Specs } from '../../types';
 import { getSpecs, getMemoryInfo, defaultSpecs, satisfiesPrequisites, type MemoryInfo } from '../lib/specs';
+import { ContainerRuntime } from '../lib/containerRuntime';
 import { WINDOWS_VERSIONS, WINDOWS_LANGUAGES, type WindowsVersionKey } from "../lib/constants";
 import { InstallManager, type InstallState, InstallStates } from '../lib/install';
 import { openAnchorLink } from '../utils/openLink';
@@ -661,9 +678,50 @@ const MIN_RAM_GB = 2;
 const MIN_DISK_GB = 32;
 const $router = useRouter();
 const specs = ref<Specs>({ ...defaultSpecs });
+const detectedRuntime = ref<'docker' | 'podman' | null>(null);
 const currentStepIdx = ref(0);
 const currentStep = computed(() => steps[currentStepIdx.value]);
 const installFolder = ref("");
+
+// Computed property that checks prerequisites
+const prerequisitesSatisfied = computed(() => {
+    // Check if group membership is required (only for Docker, not Podman)
+    const requiresGroup = detectedRuntime.value === 'docker';
+    const groupCheckPassed = requiresGroup ? specs.value.dockerIsInUserGroups : true;
+
+    const result = specs.value.dockerInstalled &&
+        specs.value.dockerComposeInstalled &&
+        specs.value.dockerIsRunning &&
+        groupCheckPassed &&
+        specs.value.freeRDP3Installed &&
+        specs.value.ipTablesLoaded &&
+        specs.value.iptableNatLoaded &&
+        specs.value.kvmEnabled &&
+        specs.value.ramGB >= 4 &&
+        specs.value.cpuThreads >= 2 &&
+        specs.value.diskSpaceGB >= 32;
+
+    // Debug logging
+    console.log('Prerequisites check:', {
+        detectedRuntime: detectedRuntime.value,
+        requiresGroup,
+        groupCheckPassed,
+        dockerInstalled: specs.value.dockerInstalled,
+        dockerComposeInstalled: specs.value.dockerComposeInstalled,
+        dockerIsRunning: specs.value.dockerIsRunning,
+        dockerIsInUserGroups: specs.value.dockerIsInUserGroups,
+        freeRDP3Installed: specs.value.freeRDP3Installed,
+        ipTablesLoaded: specs.value.ipTablesLoaded,
+        iptableNatLoaded: specs.value.iptableNatLoaded,
+        kvmEnabled: specs.value.kvmEnabled,
+        ramGB: specs.value.ramGB,
+        cpuThreads: specs.value.cpuThreads,
+        diskSpaceGB: specs.value.diskSpaceGB,
+        result
+    });
+
+    return result;
+});
 const windowsVersion = ref<WindowsVersionKey>("11");
 const windowsLanguage = ref("English");
 const customIsoPath = ref("");
@@ -680,17 +738,25 @@ const installState = ref<InstallState>(InstallStates.IDLE);
 const preinstallMsg = ref("");
 
 onMounted(async () => {
+    console.log("[SetupUI] Component mounted, starting initialization...");
+
+    // Detect container runtime first
+    detectedRuntime.value = await ContainerRuntime.detectRuntime();
+    console.log("[SetupUI] Detected runtime:", detectedRuntime.value);
+
     specs.value = await getSpecs();
-    console.log("Specs", specs.value);
+    console.log("[SetupUI] Specs loaded:", specs.value);
 
     memoryInfo.value = await getMemoryInfo();
     memoryInterval.value = setInterval(async () => {
         memoryInfo.value = await getMemoryInfo();
     }, 1000);
-    console.log("Memory Info", memoryInfo.value);
+    console.log("[SetupUI] Memory Info:", memoryInfo.value);
 
     username.value = os.userInfo().username;
-    console.log("Username", username.value);
+    console.log("[SetupUI] Username:", username.value);
+
+    console.log("[SetupUI] Prerequisites satisfied:", prerequisitesSatisfied.value);
 })
 
 onUnmounted(() => {
